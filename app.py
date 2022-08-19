@@ -1,53 +1,122 @@
-# Import Flask dependency
-from flask import Flask
+# Import dependencies
+import datetime as dt
+import numpy as np
+import pandas as pd
 
-# Create a New Flask App Instance
-# We're now ready to create a new Flask app instance. "Instance" is a general term in programming to refer to a singular version of something.
-# Add the following to your code to create a new Flask instance called app:
+import sqlalchemy
+from sqlalchemy.ext.automap import automap_base
+from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, func
 
+from flask import Flask, jsonify
+
+# Set up the database
+engine = create_engine("sqlite:///hawaii.sqlite")
+
+# Reflect the database into our classes
+Base = automap_base()
+Base.prepare(engine, reflect=True)
+
+# Save references to each table
+Measurement = Base.classes.measurement
+Station = Base.classes.station
+
+# Create session link from Python to database
+session = Session(engine)
+
+# Set up Flask
+# Define the Flask app
 app = Flask(__name__)
 
-# IMPORTANT: You probably noticed the __name__ variable inside of the Flask() function. Let's pause for a second and identify what's going on here.
-# This __name__ variable denotes the name of the current function. You can use the __name__ variable to determine if your code is being run from the
-# command line or if it has been imported into another piece of code. Variables with underscores before and after them are called magic methods in Python.
+# Define the welcome route
+@app.route("/")
 
-# Create Flask Routes
-# Our Flask app has been created—let's create our first route!
+# Create the function
+def welcome():
+    return(
+    '''
+    Welcome to the Climate Analysis API!
+    Available Routes:
+    /api/v1.0/precipitation
+    /api/v1.0/stations
+    /api/v1.0/tobs
+    /api/v1.0/temp/start/end
+    ''')
 
-# First, we need to define the starting point, also known as the root. To do this, we'll use the function @app.route('/'). Add this to your code now.
+# Create the route for precipitation analysis
+@app.route("/api/v1.0/precipitation")
 
-@app.route('/')
+# Create the function
+def precipitation():
+    # calculate the date one year ago from the most recent date in database
+    prev_year = dt.date(2017, 8, 23) - dt.timedelta(days=365)
+    # write a query to get the date and precipitation for the previous year
+    precipitation = session.query(Measurement.date, Measurement.prcp).\
+        filter(Measurement.date >= prev_year).all()
+    # create a dictionary with the date as the key and precipitation as the value
+    precip = {date: prcp for date, prcp in precipitation}
+    # jsonify the dictionary and return the results
+    return jsonify(precip)
 
-# NOTE: Notice the forward slash inside of the app.route? This denotes that we want to put our data at the root of our routes. The forward slash is
-# commonly known as the highest level of hierarchy in any computer system.
+# Create the stations route
+@app.route("/api/v1.0/stations")
 
-# Next, create a function called hello_world(). Whenever you make a route in Flask, you put the code you want in that specific route below @app.route(). Here's what it will look like:
+# Create the function
+def stations():
+    # create a query that will allow us to get all stations into our database
+    results = session.query(Station.station).all()
+    # unravel the results into a one-dimensional array and convert to a list
+    stations = list(np.ravel(results))
+    # jsonify the list and return it as JSON
+    return jsonify(stations=stations)
 
-@app.route('/')
-def hello_world():
-    return 'Hello world'
+# Create the route for temperature observations
+@app.route("/api/v1.0/tobs")
 
-# Run a Flask App
-# The process of running a Flask app is a bit different from how we've run Python files. To run the app, we're first going to need to use the command line to navigate to the folder
-# where we've saved our code. You should save this code in the same folder you've used in the rest of this module.
+# Create the function
+def temp_monthly():
+    # calculate the date one year ago from the last date in database
+    prev_year = dt.date(2017, 8, 23) - dt.timedelta(days=365)
+    # add query statement for the primary station for all temp
+    # observations from previous year
+    results = session.query(Measurement.tobs).\
+        filter(Measurement.station == 'USC00519281').\
+        filter(Measurement.date >= prev_year).all()
+    # unravel the results into a one-dimensional array and convert to a list 
+    temps = list(np.ravel(results))
+    # jsonify the list and return the results
+    return jsonify(temps=temps)
 
-# Once you've ensured that your code is saved in the proper directory, then run the following command in Anaconda Powershell.
-# This command sets the FLASK_APP environment variable to the name of our Flask file, app.py.
+# Create the route to report on minimum, average, and maximum temps
+@app.route("/api/v1.0/temp/<start>")
+@app.route("/api/v1.0/temp/<start>/<end>")
 
-# NOTE: Environment variables are essentially dynamic variables in your computer. They are used to modify the way a certain aspect of the computer operates.
-# For our FLASK_APP environment variable, we want to modify the path that will run our app.py file so that we can run our file.
+# Create the function (add two parameters and set both to None)
+def stats(start=None, end=None):
+    # create a list
+    sel = [func.min(Measurement.tobs), func.avg(Measurement.tobs), func.max(Measurement.tobs)]
 
-# set FLASK_APP=app.py
+    # add an if-not statement to query our database using the list,
+    # unravel the results into a one-dimensional array,
+    # and convert to a list
+    if not end:
+        # the *sel indicates there will be multiple results: min, avg, and max temps
+        results = session.query(*sel).\
+            filter(Measurement.date >= start).all()
+        temps = list(np.ravel(results))
+        # jsonify the list and return the results
+        return jsonify(temps)
 
-# Now let's run our Flask app. To do this, type the following command in your command line and press Enter:
+    # calculate the temp min, avg, and max with start and end dates
+    # use the sel list, which are the data points we need to collect
+    # create the next query
+    results = session.query(*sel).\
+        filter(Measurement.date >= start).\
+        filter(Measurement.date <= end).all()
+    # unravel the results into a one-dimensional array and convert to a list
+    temps = list(np.ravel(results))
+    # jsonify the list and return the results
+    return jsonify(temps)
 
-# flask run
-
-# When you run this command, you'll notice a line that says "Running on" followed by an address. This should be your localhost address and a port number.
-
-# IMPORTANT: A port number is essentially the endpoint of a given program or service. Any Flask application you create can have whatever port number you would like,
-# but the most common is 5000.
-
-# Copy and paste your localhost address into your web browser. Generally, a localhost will look something like this, for context.
-
-# localhost:5000
+# to run the app, use flask run
+# do this after navigating to the directory where app.py is saved.
